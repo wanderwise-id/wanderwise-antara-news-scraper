@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "detik-news-scraper"
+name = "antara-news-scraper"
 version = "0.1.0"
-description = "scraper for detik news website"
+description = "scraper for antara news website"
 authors = ["wiratana <andikawiratana@gmail.com>"]
 readme = "README.md"
 
