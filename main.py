@@ -39,39 +39,38 @@ class Article(Document):
 translator = GoogleTranslator(source='id', target='en')
 openai.api_key = os.environ.get("OPEN_API_KEY")
 
-# scrapper for detik.com/bali/hukum-kriminal Done
+# scrapper for https://www.antaranews.com/tag/bencana-di-bali Done
 def detik_scraper(index):
   if index == 0:
     return 0
 
-  html_content = requests.get('https://www.detik.com/bali/hukum-kriminal/indeks/{index}'.format(index=index))
+  html_content = requests.get('https://www.antaranews.com/tag/bencana-di-bali/{index}'.format(index=index))
   soup = BeautifulSoup(html_content.content, 'lxml')
-  article_list = soup.find_all('article', class_='list-content__item')
+  article_list = soup.find_all('article', class_='simple-post')
   
   for article in article_list:
-    identical_article_amount = Article.objects(link_to_origin=article.a["href"]).count()
+    identical_article_amount = Article.objects(link_to_origin=article.find("div", class_="simple-thumb").a["href"]).count()
     if identical_article_amount > 0:
       break
 
-    html_content = requests.get(article.a["href"])
+    html_content = requests.get(article.find("div", class_="simple-thumb").a["href"])
 
-    print("get link {}".format(article.a["href"]))
+    print("get link {}".format(article.find("div", class_="simple-thumb").a["href"]))
 
     soup = BeautifulSoup(html_content.content, 'lxml')
 
     print("parse html")
 
-    # pre process cleansing
-    for i in range(len(soup.find_all('p', class_='para_caption'))):
-      soup.find('p', class_='para_caption').decompose()
-
     headline = {
-      "id": (soup.find('h1', class_='detail__title')).text.strip().replace("\n", ""),
+      "id": (soup.find('h1', class_='post-title')).text.strip().replace("\n", ""),
       "en": ''
     }
 
+    if not soup.find('div', class_="post-content"):
+      break
+
     content = {
-      "id": (' '.join([p.text for p in soup.find_all('p')])).strip(),
+      "id": (' '.join([p.text for p in soup.find('div', class_="post-content").descendants])).strip().replace("\n", "").replace("\xa0", "").replace("\r", ""),
       "en": ''
     }
 
@@ -95,6 +94,7 @@ def detik_scraper(index):
         )
 
         data_obj = json.loads(response.choices[0].message.content)
+
         gpt_executed = True
         print("gpt processed")
       except Exception as e:
@@ -108,23 +108,23 @@ def detik_scraper(index):
 
     category = data_obj["category"]
 
-    date_string, timezone = (soup.find('div', class_='detail__date')).string.rsplit(' ', 1)
+    date_string, timezone = (soup.find('span', class_='article-date')).text.rsplit(' ', 1)
 
     translation_executed = False
 
     while not translation_executed:
       try:
         headline["en"] = translator.translate(headline["id"])
-        content["en"]  = (' '.join([translator.translate(p.text) for p in soup.find_all('p')])).strip()
+        content["en"] = (' '.join([translator.translate(p.text) if p is not None else "" for p in soup.find('div', class_="post-content").descendants])).strip().replace("\n", "").replace("\xa0", "").replace("\r", "")
         summary["en"]  = translator.translate(data_obj["summary"])
         date_string = translator.translate(date_string)
         translation_executed = True
         print("translation processed")
       except Exception as e:
-        print(f"failed : {e}")
+        print(f"failed 2 : {e}")
         sleep(1)
 
-    date_formats = ["%d %b %Y %H:%M", "%b %d %Y %H:%M", "%b %d, %Y %H:%M"]
+    date_formats = ["%B %d %Y %H:%M", "%d %B %Y %H:%M", "%B %d, %Y %H:%M"]
     date_string = (date_string.split(" "))
     del date_string[0]
     date_string = " ".join(date_string)
@@ -136,16 +136,19 @@ def detik_scraper(index):
         date = datetime.strptime(date_string, date_formats[format_index])
         date_formating = True
       except Exception as e:
-        print(f"failed : {e}")
-        format_index = format_index - 1
+        print(f"failed 3 : {e}")
+        format_index = format_index - 1 if format_index > 0 else format_index
+        print(date_string)
+
+    author = soup.find("p", class_="text-muted").contents[0] if soup.find("p", class_="text-muted") else "antara news"
 
     article = {
       "headline": Headline(**headline),
-      "author": (soup.find('div', class_='detail__author')).text,
+      "author": author,
       "date_published": date,
       "content": Content(**content),
       "location": data_obj["location"],
-      "link_to_origin": article.a["href"],
+      "link_to_origin": article.find("div", class_="simple-thumb").a["href"],
       "category": category,
       "summary": Summary(**summary),
       "timezone": timezone
@@ -159,7 +162,7 @@ def detik_scraper(index):
 
 def main():
   connect(db=os.environ.get("DB_NAME"),host=os.environ.get("DB_URI"))
-  detik_scraper(100)
+  detik_scraper(5)
 
 if __name__ == "__main__":
   main()
